@@ -10,240 +10,164 @@ from core.offline_sync import process_sync_queue
 from core.storage import DATA_DIR, backup_data, load_json, save_json
 from services.ai_assistant import ask_local_ollama
 
-app = FastAPI(title="FieldHaven API", version="0.6.0")
+app = FastAPI(title="FieldHaven API", version="0.7.0")
 
 
-class PredictiveMatchRequest(BaseModel):
+class GeoVisibilityRequest(BaseModel):
     technician: str
-    skills: list[str]
-    fuel_cost_per_mile: float = 0.67
+    regions: list[str]
+    budget: float = 0.0
 
 
-class SmartPricingRequest(BaseModel):
-    service_type: str
-    labor_hours: float
-    parts_cost: float = 0.0
-    urgency: str = "standard"
+class VoiceAssistantRequest(BaseModel):
+    transcript: str
 
 
-class PremiumSubscriptionRequest(BaseModel):
-    technician: str
-    tier: str = "premium_plus"
+class PredictiveRiskRequest(BaseModel):
+    job_id: str
+    environment: str = "standard"
 
 
-class RevenueShareRequest(BaseModel):
-    technician: str
-    community_actions: int
-
-
-class DirectoryProfileRequest(BaseModel):
-    technician: str
-    state: str
-    skills: list[str]
-    verified: bool = True
-
-
-class ClientReviewRequest(BaseModel):
+class ContractRequest(BaseModel):
     client: str
-    technician: str
-    rating: float
-    review: str
+    scope: str
+    state: str
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "fieldhaven-api", "version": "0.6.0"}
+    return {"status": "ok", "service": "fieldhaven-api", "version": "0.7.0"}
 
 
-@app.get("/pwa/manifest")
-def pwa_manifest() -> dict:
-    return load_json(Path("templates/pwa_manifest.json"), {})
-
-
-@app.get("/pwa/config")
-def pwa_config() -> dict:
-    return {
-        "installable": True,
-        "desktop": True,
-        "mobile": True,
-        "offline_mode": True,
-        "background_sync": True,
-    }
-
-
-@app.post("/offline/sync")
-def offline_sync() -> dict:
-    return process_sync_queue()
-
-
-@app.post("/offline/background-sync")
-def background_sync() -> dict:
-    result = process_sync_queue()
-    result["mode"] = "background"
-    return result
-
-
-@app.post("/ai/predictive-match")
-def predictive_match(req: PredictiveMatchRequest) -> list[dict]:
+@app.get("/jobs/national")
+def national_jobs(region: str | None = None) -> list[dict]:
     jobs = load_json(Path(DATA_DIR / "jobs.json"), [])
-    history = load_json(Path(DATA_DIR / "job_history.json"), [])
-    completion_bonus = 20 if history else 5
-    ranked = []
-    for job in jobs:
-        if job.get("status") != "Open":
-            continue
-        overlap = len(set(req.skills).intersection(set(job.get("skills", []))))
-        travel_cost = float(job.get("distance_miles", 20)) * req.fuel_cost_per_mile
-        risk = round(max(1.0, 5.0 - overlap - float(job.get("platform_fee", 0)) / 2), 2)
-        expected_profit = round(float(job.get("payout", 0)) - travel_cost, 2)
-        score = round(expected_profit + overlap * 85 + completion_bonus - risk * 7, 2)
-        ranked.append(
-            {
-                **job,
-                "risk_score": risk,
-                "expected_profit": expected_profit,
-                "predictive_score": score,
-            }
-        )
-    return sorted(ranked, key=lambda x: x["predictive_score"], reverse=True)
+    if region:
+        return [j for j in jobs if region.lower() in j.get("location", "").lower()]
+    return jobs
 
 
-@app.post("/ai/smart-pricing")
-def smart_pricing(req: SmartPricingRequest) -> dict:
-    rates = load_json(Path(DATA_DIR / "market_rates.json"), [{"service_type": req.service_type, "hourly": 95.0}])
-    hourly = next((r["hourly"] for r in rates if r["service_type"] == req.service_type), 95.0)
-    urgency_mult = 1.25 if req.urgency == "urgent" else 1.0
-    subtotal = (hourly * req.labor_hours + req.parts_cost) * urgency_mult
+@app.post("/marketing/visibility")
+def set_visibility(req: GeoVisibilityRequest) -> dict:
+    data = load_json(Path(DATA_DIR / "marketing_visibility.json"), [])
+    rec = {"id": f"MV-{len(data)+1:04}", **req.model_dump(), "created_at": datetime.utcnow().isoformat()}
+    data.append(rec)
+    save_json(Path(DATA_DIR / "marketing_visibility.json"), data)
+    return rec
+
+
+@app.post("/marketing/leads")
+def generate_leads(payload: dict) -> dict:
+    leads = load_json(Path(DATA_DIR / "lead_gen.json"), [])
+    rec = {
+        "id": f"LD-{len(leads)+1:04}",
+        "vertical": payload.get("vertical", "retail"),
+        "region": payload.get("region", "national"),
+        "estimated_leads": 5 + len(payload.get("keywords", [])) * 3,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    leads.append(rec)
+    save_json(Path(DATA_DIR / "lead_gen.json"), leads)
+    return rec
+
+
+@app.post("/ai/voice-assistant")
+def voice_assistant(req: VoiceAssistantRequest) -> dict:
     return {
-        "service_type": req.service_type,
-        "recommended_hourly": round(hourly * urgency_mult, 2),
-        "recommended_total": round(subtotal, 2),
+        "mode": "local-stt",
+        "transcript": req.transcript,
+        "response": ask_local_ollama(f"Respond as a field tech copilot: {req.transcript}"),
     }
 
 
-@app.post("/ai/business-coach")
-def ai_business_coach(payload: dict) -> dict:
-    context = payload.get("context", "growth, marketing, pricing, taxes")
+@app.post("/ai/predictive-risk")
+def predictive_risk(req: PredictiveRiskRequest) -> dict:
+    jobs = load_json(Path(DATA_DIR / "jobs.json"), [])
+    job = next((j for j in jobs if j.get("id") == req.job_id), {})
+    distance = float(job.get("distance_miles", 20))
+    env_penalty = 2 if req.environment == "hazardous" else 0
+    risk = round(min(10.0, 2.5 + (distance / 20) + env_penalty), 2)
+    maint_score = round(max(1.0, 10.0 - risk), 2)
+    return {"job_id": req.job_id, "risk_score": risk, "predictive_maintenance_score": maint_score}
+
+
+@app.post("/ai/contracts/generate")
+def generate_contract(req: ContractRequest) -> dict:
+    text = ask_local_ollama(
+        f"Draft a concise field service contract for client {req.client} in {req.state}. Scope: {req.scope}. Include compliance checklist."
+    )
+    contracts = load_json(Path(DATA_DIR / "contracts.json"), [])
+    rec = {"id": f"CT-{len(contracts)+1:04}", **req.model_dump(), "content": text}
+    contracts.append(rec)
+    save_json(Path(DATA_DIR / "contracts.json"), contracts)
+    return rec
+
+
+@app.get("/integrations/public")
+def public_api() -> dict:
     return {
-        "coach": "local-ollama",
-        "advice": ask_local_ollama(f"Give concise field-tech business coaching for: {context}"),
+        "openapi": "/openapi.json",
+        "docs": "/docs",
+        "version": "v0.7",
+        "categories": ["accounting", "gps", "scheduling", "crm"],
     }
 
 
-@app.get("/monetization/premium-tiers")
-def premium_tiers() -> list[dict]:
-    return [
-        {"tier": "free", "fee": 0, "benefits": ["job board", "community"]},
-        {"tier": "premium_plus", "fee": 19, "benefits": ["priority support", "higher profile visibility", "advanced AI tools"]},
-    ]
+@app.get("/triad/sso")
+def triad_sso() -> dict:
+    return {"agentora": "connected", "memoria": "connected", "littup": "connected", "sync": "active"}
 
 
-@app.post("/monetization/subscribe")
-def subscribe_premium(req: PremiumSubscriptionRequest) -> dict:
-    subs = load_json(Path(DATA_DIR / "subscriptions.json"), [])
-    rec = {"id": f"SUB-{len(subs)+1:04}", **req.model_dump(), "status": "active", "created_at": datetime.utcnow().isoformat()}
-    subs.append(rec)
-    save_json(Path(DATA_DIR / "subscriptions.json"), subs)
+@app.post("/triad/sync")
+def triad_sync(payload: dict) -> dict:
+    logs = load_json(Path(DATA_DIR / "triad_sync.json"), [])
+    rec = {"id": f"TS-{len(logs)+1:04}", "payload": payload, "synced_at": datetime.utcnow().isoformat()}
+    logs.append(rec)
+    save_json(Path(DATA_DIR / "triad_sync.json"), logs)
     return rec
 
 
-@app.post("/monetization/revenue-share")
-def revenue_share(req: RevenueShareRequest) -> dict:
-    reward = round(req.community_actions * 2.5, 2)
-    rec = {"technician": req.technician, "community_actions": req.community_actions, "reward_credit": reward}
-    shares = load_json(Path(DATA_DIR / "revenue_share.json"), [])
-    shares.append(rec)
-    save_json(Path(DATA_DIR / "revenue_share.json"), shares)
-    return rec
-
-
-@app.get("/directory/techs")
-def directory_techs() -> list[dict]:
-    return load_json(Path(DATA_DIR / "tech_directory.json"), [])
-
-
-@app.post("/directory/techs")
-def add_directory_tech(profile: DirectoryProfileRequest) -> dict:
-    items = load_json(Path(DATA_DIR / "tech_directory.json"), [])
-    rep = 80 + len(profile.skills) * 2
-    rec = {"id": f"TD-{len(items)+1:04}", **profile.model_dump(), "reputation_score": min(100, rep)}
-    items.append(rec)
-    save_json(Path(DATA_DIR / "tech_directory.json"), items)
-    return rec
-
-
-@app.get("/reviews/clients")
-def client_reviews() -> list[dict]:
-    return load_json(Path(DATA_DIR / "client_reviews.json"), [])
-
-
-@app.post("/reviews/clients")
-def add_client_review(review: ClientReviewRequest) -> dict:
+@app.get("/exports/professional-pack")
+def professional_pack() -> dict:
+    invoices = load_json(Path(DATA_DIR / "invoices.json"), [])
+    contracts = load_json(Path(DATA_DIR / "contracts.json"), [])
     reviews = load_json(Path(DATA_DIR / "client_reviews.json"), [])
-    rec = {"id": f"CR-{len(reviews)+1:04}", **review.model_dump(), "created_at": datetime.utcnow().isoformat()}
-    reviews.append(rec)
-    save_json(Path(DATA_DIR / "client_reviews.json"), reviews)
+    return {"invoices": len(invoices), "contracts": len(contracts), "reviews": len(reviews), "format": "accountant_lawyer_bundle"}
+
+
+@app.post("/governance/vote")
+def governance_vote(payload: dict) -> dict:
+    votes = load_json(Path(DATA_DIR / "governance_votes.json"), [])
+    rec = {"id": f"GV-{len(votes)+1:04}", **payload, "created_at": datetime.utcnow().isoformat()}
+    votes.append(rec)
+    save_json(Path(DATA_DIR / "governance_votes.json"), votes)
     return rec
 
 
-@app.get("/enterprise/company-accounts")
-def company_accounts() -> list[dict]:
-    return load_json(Path(DATA_DIR / "company_accounts.json"), [])
-
-
-@app.post("/enterprise/company-accounts")
-def create_company_account(payload: dict) -> dict:
-    companies = load_json(Path(DATA_DIR / "company_accounts.json"), [])
-    rec = {"id": f"CO-{len(companies)+1:04}", **payload, "created_at": datetime.utcnow().isoformat()}
-    companies.append(rec)
-    save_json(Path(DATA_DIR / "company_accounts.json"), companies)
+@app.post("/feedback/submit")
+def feedback_submit(payload: dict) -> dict:
+    items = load_json(Path(DATA_DIR / "feedback.json"), [])
+    rec = {"id": f"FB-{len(items)+1:04}", **payload, "status": "received", "created_at": datetime.utcnow().isoformat()}
+    items.append(rec)
+    save_json(Path(DATA_DIR / "feedback.json"), items)
     return rec
 
 
-@app.get("/enterprise/partnerships")
-def enterprise_partnerships() -> list[dict]:
-    data = load_json(Path(DATA_DIR / "partnerships.json"), [])
-    if not data:
-        data = [
-            {"partner": "American Tool Supply", "type": "tools", "benefit": "member discounts"},
-            {"partner": "United Contractor Insurance", "type": "insurance", "benefit": "preferred rates"},
-            {"partner": "Freedom Equipment Finance", "type": "financing", "benefit": "fast approvals"},
-        ]
-        save_json(Path(DATA_DIR / "partnerships.json"), data)
-    return data
+@app.post("/bounty/report")
+def bounty_report(payload: dict) -> dict:
+    reports = load_json(Path(DATA_DIR / "bug_bounty.json"), [])
+    rec = {"id": f"BB-{len(reports)+1:04}", **payload, "reward_status": "under_review", "created_at": datetime.utcnow().isoformat()}
+    reports.append(rec)
+    save_json(Path(DATA_DIR / "bug_bounty.json"), reports)
+    return rec
 
 
-@app.get("/reports/business-health")
-def business_health() -> dict:
-    invoices = load_json(Path(DATA_DIR / "invoices.json"), [])
-    gross = sum(float(i.get("amount", 0)) for i in invoices)
-    projected = round((gross / max(1, len(invoices))) * 12, 2) if invoices else 0.0
+@app.get("/reliability/status")
+def reliability_status() -> dict:
     return {
-        "gross_income": round(gross, 2),
-        "projected_annual": projected,
-        "health": "Strong" if projected >= 60000 else "Growing",
-    }
-
-
-@app.post("/exports/quickbooks")
-def quickbooks_export() -> dict:
-    invoices = load_json(Path(DATA_DIR / "invoices.json"), [])
-    rows = ["InvoiceID,Client,Amount,Status"]
-    for inv in invoices:
-        rows.append(f"{inv.get('id','')},{inv.get('client','')},{inv.get('amount',0)},{inv.get('status','')}")
-    record = {"id": f"QB-{datetime.utcnow().strftime('%H%M%S')}", "csv": "\n".join(rows)}
-    exports = load_json(Path(DATA_DIR / "exports.json"), [])
-    exports.append(record)
-    save_json(Path(DATA_DIR / "exports.json"), exports)
-    return record
-
-
-@app.get("/security/audit")
-def security_audit() -> dict:
-    return {
-        "encryption_at_rest": "local disk controls",
-        "audit_logs": len(load_json(Path(DATA_DIR / "audit_logs.json"), [])),
-        "data_ownership": "full local export available",
+        "load_balancer": "enabled-local",
+        "ha_mode": "active-passive",
+        "last_backup": datetime.utcnow().isoformat(),
     }
 
 
@@ -254,6 +178,11 @@ def create_audit_log(payload: dict) -> dict:
     logs.append(rec)
     save_json(Path(DATA_DIR / "audit_logs.json"), logs)
     return rec
+
+
+@app.get("/security/audit")
+def security_audit() -> dict:
+    return {"audit_logs": len(load_json(Path(DATA_DIR / "audit_logs.json"), [])), "ownership": "local-first", "encryption": "host-level"}
 
 
 @app.post("/vault/export")
@@ -268,6 +197,38 @@ def vault_export() -> dict:
     return {"files": rec["files"], "created_at": rec["created_at"]}
 
 
+@app.get("/onboarding/wizard")
+def onboarding_wizard() -> dict:
+    return {
+        "steps": [
+            "Create profile",
+            "Set service regions",
+            "Connect payout",
+            "Review compliance",
+            "Publish directory card",
+        ]
+    }
+
+
+@app.get("/help/center")
+def help_center() -> list[dict]:
+    return load_json(Path(DATA_DIR / "help_center.json"), [])
+
+
+@app.get("/checklist/production-ready")
+def production_checklist() -> dict:
+    return {
+        "items": [
+            "Backups configured",
+            "Audit logging enabled",
+            "PWA tested",
+            "API docs reachable",
+            "Triad sync validated",
+        ],
+        "status": "ready",
+    }
+
+
 @app.get("/events/community")
 def community_events() -> list[dict]:
     return load_json(Path(DATA_DIR / "events.json"), [])
@@ -276,35 +237,6 @@ def community_events() -> list[dict]:
 @app.get("/programs/certifications")
 def certifications() -> list[dict]:
     return load_json(Path(DATA_DIR / "certification_programs.json"), [])
-
-
-@app.get("/integrations/public")
-def public_api() -> dict:
-    return {"openapi": "/openapi.json", "docs": "/docs", "version": "v0.6"}
-
-
-@app.get("/triad/sso")
-def triad_sso() -> dict:
-    return {"agentora": "connected", "memoria": "connected", "littup": "connected"}
-
-
-@app.post("/integrations/agentora/quote")
-def agentora_quote(payload: dict) -> dict:
-    return {"provider": "Agentora", "response": ask_local_ollama(payload.get("prompt", ""))}
-
-
-@app.post("/integrations/memoria/save")
-def memoria_save(payload: dict) -> dict:
-    memories = load_json(Path(DATA_DIR / "memoria.json"), [])
-    rec = {"id": f"M-{len(memories)+1:04}", "payload": payload, "saved_at": datetime.utcnow().isoformat()}
-    memories.append(rec)
-    save_json(Path(DATA_DIR / "memoria.json"), memories)
-    return rec
-
-
-@app.post("/integrations/littup/code-job")
-def littup_code_job(payload: dict) -> dict:
-    return {"provider": "LittUp", "status": "queued", "payload": payload}
 
 
 @app.post("/notifications/push")

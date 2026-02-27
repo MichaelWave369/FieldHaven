@@ -8,18 +8,14 @@ from core.offline_sync import queue_offline_action
 from core.sample_data import bootstrap_sample_data
 
 API_BASE = "http://127.0.0.1:8008"
-st.set_page_config(page_title="FieldHaven v0.6", page_icon="🛠️", layout="wide")
+st.set_page_config(page_title="FieldHaven v0.7", page_icon="🛠️", layout="wide")
 
 
-def theme(mode: str) -> None:
+def apply_theme(mode: str) -> None:
     if mode == "light":
-        bg = "#f6f7fb"
-        fg = "#161b22"
-        card = "rgba(0,0,0,.03)"
+        bg, fg, card = "#f7f8fc", "#111827", "rgba(0,0,0,.04)"
     else:
-        bg = "radial-gradient(circle at 10% 20%, #1f2430 0%, #10131c 45%, #080a11 100%)"
-        fg = "#f5f5f5"
-        card = "rgba(255,255,255,.03)"
+        bg, fg, card = "radial-gradient(circle at 10% 20%, #1f2430 0%, #10131c 45%, #080a11 100%)", "#f5f7fa", "rgba(255,255,255,.03)"
     st.markdown(
         f"""
         <style>
@@ -33,7 +29,7 @@ def theme(mode: str) -> None:
 
 def api_get(endpoint: str, fallback=None):
     try:
-        return requests.get(f"{API_BASE}{endpoint}", timeout=5).json()
+        return requests.get(f"{API_BASE}{endpoint}", timeout=6).json()
     except Exception:
         return fallback if fallback is not None else []
 
@@ -45,114 +41,105 @@ def api_post(endpoint: str, payload=None, fallback=None):
         return fallback if fallback is not None else {"message": "offline"}
 
 
-def pwa_page() -> None:
-    st.subheader("Multi-Platform Experience")
-    st.json(api_get("/pwa/config", {}))
-    st.json(api_get("/pwa/manifest", {}))
-    if st.button("Queue Offline Action"):
-        st.json(queue_offline_action("visit", {"context": "mobile_pwa"}))
-    if st.button("Run Background Sync"):
-        st.json(api_post("/offline/background-sync"))
-
-
-def monetization_page() -> None:
-    st.subheader("Advanced Monetization (Tech-Friendly)")
-    st.dataframe(api_get("/monetization/premium-tiers", []), use_container_width=True)
+def national_scale_page() -> None:
+    st.subheader("National Scale & Marketing")
+    st.dataframe(api_get("/jobs/national", []), use_container_width=True)
+    if st.button("Generate Leads"):
+        st.json(api_post("/marketing/leads", {"vertical": "retail", "region": "texas", "keywords": ["pos", "network"]}))
     tech = st.text_input("Technician", "Tech-USA")
-    if st.button("Subscribe Premium"):
-        st.json(api_post("/monetization/subscribe", {"technician": tech, "tier": "premium_plus"}))
-    actions = st.number_input("Community contribution actions", min_value=0, value=10)
-    if st.button("Calculate Revenue Share"):
-        st.json(api_post("/monetization/revenue-share", {"technician": tech, "community_actions": int(actions)}))
+    if st.button("Save Visibility Controls"):
+        st.json(api_post("/marketing/visibility", {"technician": tech, "regions": ["TX", "OK"], "budget": 50}))
 
 
-def directory_page() -> None:
-    st.subheader("National Directory & Reputation")
-    st.dataframe(api_get("/directory/techs", []), use_container_width=True)
-    name = st.text_input("New Technician Profile")
-    state = st.text_input("State", "TX")
-    if st.button("Add Verified Profile"):
-        st.json(api_post("/directory/techs", {"technician": name, "state": state, "skills": ["POS", "Networking"], "verified": True}))
-
-    st.markdown("### Client Reviews")
-    st.dataframe(api_get("/reviews/clients", []), use_container_width=True)
-    if st.button("Add Client Review"):
-        st.json(api_post("/reviews/clients", {"client": "SampleClient", "technician": name or "Tech-USA", "rating": 4.8, "review": "Great scope clarity and fast pay."}))
-
-
-def ai_coach_page() -> None:
-    st.subheader("AI Business Coach")
-    context = st.text_area("Business coaching context", "Improve pricing and tax planning for a 2-tech operation.")
-    if st.button("Get AI Coach Advice"):
-        st.write(api_post("/ai/business-coach", {"context": context}).get("advice", ""))
-    st.markdown("### Predictive Match")
-    st.dataframe(api_post("/ai/predictive-match", {"technician": "Tech-USA", "skills": ["POS", "Fiber"]}, []), use_container_width=True)
-    st.markdown("### Smart Pricing")
-    st.json(api_post("/ai/smart-pricing", {"service_type": "POS", "labor_hours": 2.0, "parts_cost": 15.0, "urgency": "standard"}))
+def ai_suite_page() -> None:
+    st.subheader("Advanced AI Suite")
+    transcript = st.text_area("Voice Transcript (local STT output)", "Need help pricing a same-day fiber repair.")
+    if st.button("Run Voice AI Assistant"):
+        st.json(api_post("/ai/voice-assistant", {"transcript": transcript}))
+    if st.button("Predict Job Risk"):
+        st.json(api_post("/ai/predictive-risk", {"job_id": "J-1002", "environment": "standard"}))
+    if st.button("Generate Contract + Compliance"):
+        st.json(api_post("/ai/contracts/generate", {"client": "Acme Retail", "scope": "POS refresh", "state": "TX"}))
+    st.markdown("### AI Business Coach")
+    st.write(api_post("/ai/business-coach", {"context": "pricing, marketing, tax optimization"}).get("advice", ""))
 
 
-def enterprise_page() -> None:
-    st.subheader("Enterprise & Partnerships")
-    if st.button("Create Company Account"):
-        st.json(api_post("/enterprise/company-accounts", {"name": "USA Tech Crew", "owner": "Owner01", "size": 5}))
-    st.dataframe(api_get("/enterprise/company-accounts", []), use_container_width=True)
-    st.markdown("### Official Partnerships")
-    st.dataframe(api_get("/enterprise/partnerships", []), use_container_width=True)
+def ecosystem_page() -> None:
+    st.subheader("Ecosystem Leadership")
+    st.json(api_get("/integrations/public", {}))
+    st.json(api_get("/triad/sso", {}))
+    if st.button("Run Triad Data Sync"):
+        st.json(api_post("/triad/sync", {"source": "fieldhaven", "targets": ["agentora", "memoria", "littup"]}))
+    st.markdown("### Exportable Professional Data Pack")
+    st.json(api_get("/exports/professional-pack", {}))
 
 
-def final_polish_page() -> None:
-    st.subheader("Final Polish & Scale")
-    st.metric("API Health", api_get("/health", {}).get("status", "unknown"))
-    st.json(api_get("/reports/business-health", {}))
-    if st.button("Run Security Audit Log"):
-        st.json(api_post("/security/audit/log", {"actor": "system", "event": "routine_check"}))
+def governance_page() -> None:
+    st.subheader("User Governance & Feedback")
+    if st.button("Submit Governance Vote"):
+        st.json(api_post("/governance/vote", {"topic": "routing enhancements", "vote": "yes", "voter": "TechA"}))
+    if st.button("Submit Feedback"):
+        st.json(api_post("/feedback/submit", {"category": "ux", "message": "Add map clustering on national board."}))
+    if st.button("Submit Bug Bounty Report"):
+        st.json(api_post("/bounty/report", {"severity": "medium", "description": "edge-case validation issue"}))
+
+
+def reliability_page() -> None:
+    st.subheader("Performance & Reliability")
+    st.json(api_get("/reliability/status", {}))
+    if st.button("Queue Offline Event"):
+        st.json(queue_offline_action("sync_event", {"source": "mobile"}))
+    if st.button("Run Offline Sync"):
+        st.json(api_post("/offline/sync"))
+    if st.button("Create Backup"):
+        st.json(api_post("/backup"))
+    if st.button("Push Notification Test"):
+        st.json(api_post("/notifications/push", {"type": "job_alert", "message": "New national lead available"}))
+    st.dataframe(api_get("/notifications/push", []), use_container_width=True)
+
+
+def launch_readiness_page() -> None:
+    st.subheader("Final Polish & Launch Readiness")
+    st.json(api_get("/onboarding/wizard", {}))
+    st.dataframe(api_get("/help/center", []), use_container_width=True)
+    st.json(api_get("/checklist/production-ready", {}))
+    if st.button("Write Audit Log"):
+        st.json(api_post("/security/audit/log", {"actor": "admin", "event": "launch_check"}))
     st.json(api_get("/security/audit", {}))
     if st.button("Export Full Vault"):
         st.json(api_post("/vault/export"))
-    st.markdown("### Community Events")
+    st.markdown("### Events + Certifications")
     st.dataframe(api_get("/events/community", []), use_container_width=True)
-    st.markdown("### Certification Programs")
     st.dataframe(api_get("/programs/certifications", []), use_container_width=True)
-
-
-def integrations_page() -> None:
-    st.subheader("Public API & Triad369 Integrations")
-    st.json(api_get("/integrations/public", {}))
-    st.json(api_get("/triad/sso", {}))
-    prompt = st.text_input("Agentora Prompt")
-    if st.button("Run Agentora Quote"):
-        st.json(api_post("/integrations/agentora/quote", {"prompt": prompt}))
 
 
 def main() -> None:
     bootstrap_sample_data()
     start_embedded_api()
 
-    st.title("🛠️ FieldHaven v0.6")
-    st.caption("Premium professional American platform built tech-first, local-first, and open-source.")
+    st.title("🛠️ FieldHaven v0.7")
+    st.caption("National-scale, premium, local-first American platform for field tech ownership.")
 
     mode = st.sidebar.selectbox("Theme", ["dark", "light"])
-    theme(mode)
+    apply_theme(mode)
 
     page = st.sidebar.radio(
         "Navigate",
-        ["PWA", "Monetization", "Directory", "AI Coach", "Enterprise", "Final Polish", "Integrations"],
+        ["National Scale", "AI Suite", "Ecosystem", "Governance", "Reliability", "Launch Readiness"],
     )
 
-    if page == "PWA":
-        pwa_page()
-    elif page == "Monetization":
-        monetization_page()
-    elif page == "Directory":
-        directory_page()
-    elif page == "AI Coach":
-        ai_coach_page()
-    elif page == "Enterprise":
-        enterprise_page()
-    elif page == "Final Polish":
-        final_polish_page()
+    if page == "National Scale":
+        national_scale_page()
+    elif page == "AI Suite":
+        ai_suite_page()
+    elif page == "Ecosystem":
+        ecosystem_page()
+    elif page == "Governance":
+        governance_page()
+    elif page == "Reliability":
+        reliability_page()
     else:
-        integrations_page()
+        launch_readiness_page()
 
 
 if __name__ == "__main__":
