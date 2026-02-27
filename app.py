@@ -1,25 +1,31 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import requests
 import streamlit as st
 
 from backend.server import start_embedded_api
 from core.offline_sync import queue_offline_action
 from core.sample_data import bootstrap_sample_data
-from core.storage import DATA_DIR, load_json
 
 API_BASE = "http://127.0.0.1:8008"
-st.set_page_config(page_title="FieldHaven v0.4", page_icon="🛠️", layout="wide")
+st.set_page_config(page_title="FieldHaven v0.5", page_icon="🛠️", layout="wide")
 
 
-def load_css() -> None:
+def apply_theme(mode: str) -> None:
+    if mode == "light":
+        bg = "#f7f8fb"
+        fg = "#141821"
+        card = "rgba(20,24,33,.05)"
+    else:
+        bg = "radial-gradient(circle at 10% 20%, #1f2430 0%, #10131c 45%, #080a11 100%)"
+        fg = "#f5f5f5"
+        card = "rgba(255,255,255,.03)"
+
     st.markdown(
-        """
+        f"""
         <style>
-        .stApp {background: radial-gradient(circle at 10% 20%, #1f2430 0%, #10131c 45%, #080a11 100%); color: #f5f5f5;}
-        .card {border:1px solid rgba(255,255,255,.12); border-left:4px solid #e63946; padding:1rem; border-radius:14px; margin-bottom:.7rem; background:rgba(255,255,255,.03)}
+        .stApp {{background: {bg}; color: {fg};}}
+        .fh-card {{border:1px solid rgba(255,255,255,.12); border-left:4px solid #e63946; padding:1rem; border-radius:14px; margin-bottom:.6rem; background:{card};}}
         </style>
         """,
         unsafe_allow_html=True,
@@ -40,125 +46,109 @@ def api_post(endpoint: str, payload=None, fallback=None):
         return fallback if fallback is not None else {"message": "offline"}
 
 
-def top_bar() -> None:
-    a, b, c, d = st.columns(4)
-    if a.button("🚨 Emergency", use_container_width=True):
-        st.error(api_post("/support/emergency")["message"])
-    if b.button("🔄 Smart Sync", use_container_width=True):
-        st.success(str(api_post("/offline/sync")))
-    if c.button("📦 Vault Export", use_container_width=True):
-        st.info(str(api_post("/vault/export")))
-    if d.button("🔔 Push Alert Test", use_container_width=True):
-        st.json(api_post("/notifications/push", {"kind": "new_job", "text": "New job available"}))
+def ai_page() -> None:
+    st.subheader("Advanced AI: Predictive Match + Smart Pricing")
+    skills = st.multiselect("Skills", ["POS", "Networking", "Fiber", "Troubleshooting"])
+    tech = st.text_input("Technician", "Tech-USA")
+    if st.button("Run Predictive Matching"):
+        recs = api_post("/ai/predictive-match", {"technician": tech, "skills": skills or ["POS"]}, [])
+        st.dataframe(recs, use_container_width=True)
+
+    service_type = st.selectbox("Service Type", ["Fiber", "POS", "Networking"])
+    hours = st.number_input("Hours", min_value=0.5, value=2.0)
+    urgency = st.selectbox("Urgency", ["standard", "urgent"])
+    if st.button("Smart Price Suggestion"):
+        st.json(api_post("/ai/smart-pricing", {"service_type": service_type, "labor_hours": hours, "parts_cost": 0, "urgency": urgency}))
 
 
-def team_page() -> None:
-    st.subheader("Scaling & Team Features")
-    c1, c2 = st.columns(2)
-    with c1:
-        team_id = st.text_input("Team ID", "TEAM-USA-01")
-        job_id = st.text_input("Assign Job ID", "J-1001")
-        tech = st.text_input("Technician", "TechA")
-        if st.button("Assign Job"):
-            st.json(api_post("/teams/assign", {"team_id": team_id, "job_id": job_id, "technician": tech}))
-        st.dataframe(api_get(f"/teams/calendar/{team_id}", []), use_container_width=True)
-    with c2:
-        sender = st.text_input("Crew Chat Sender", "CrewLead")
-        msg = st.text_area("Crew Chat Message")
-        if st.button("Send Crew Message"):
-            st.json(api_post("/teams/chat", {"team_id": team_id, "sender": sender, "message": msg}))
-        st.dataframe(api_get(f"/teams/chat/{team_id}", []), use_container_width=True)
+def marketplace_page() -> None:
+    st.subheader("Full Marketplace")
+    st.markdown("#### Tech-to-Tech Listings")
+    st.dataframe(api_get("/marketplace/tech", []), use_container_width=True)
+    seller = st.text_input("Seller")
+    item = st.text_input("Item")
+    price = st.number_input("Price", min_value=0.0, value=100.0)
+    if st.button("Post Listing"):
+        st.json(api_post("/marketplace/tech", {"seller": seller, "category": "Tools", "item": item, "price": price, "condition": "Used-Good"}))
+
+    st.markdown("#### Vendor Deals")
+    st.dataframe(api_get("/marketplace/vendor-deals", []), use_container_width=True)
 
 
-def business_page() -> None:
-    st.subheader("Business Intelligence + AI Advisor")
-    analytics = api_get("/analytics/business", {})
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Total Earnings", f"${analytics.get('total_earnings',0):,.2f}")
-    m2.metric("Avg Job Payout", f"${analytics.get('avg_job_payout',0):,.2f}")
-    m3.metric("Tax Reserve", f"${analytics.get('estimated_tax_reserve',0):,.2f}")
-    st.dataframe(analytics.get("top_profitable_jobs", []), use_container_width=True)
-    ctx = st.text_area("AI business advisor context", "Improve pricing, marketing, and growth for a 2-tech crew.")
-    if st.button("Run AI Advisor"):
-        st.write(api_post("/advisor/business", {"context": ctx}).get("response", ""))
+def reporting_page() -> None:
+    st.subheader("Advanced Reporting & Finance")
+    c1, c2, c3 = st.columns(3)
+    tax = api_get("/reports/tax", {})
+    forecast = api_get("/reports/forecast", {})
+    c1.metric("Estimated Tax", f"${tax.get('estimated_tax',0):,.2f}")
+    c2.metric("Quarterly Reserve", f"${tax.get('recommended_quarterly',0):,.2f}")
+    c3.metric("Forecast", f"${forecast.get('projected_annual_earnings',0):,.2f}")
+    st.info(f"Business Health: {forecast.get('business_health','N/A')}")
+    if st.button("Generate QuickBooks Export"):
+        st.json(api_post("/exports/quickbooks"))
 
 
-def vendor_page() -> None:
-    st.subheader("Partnerships & Vendor Resources")
-    st.dataframe(api_get("/vendor/marketplace", []), use_container_width=True)
-    purpose = st.selectbox("Financing purpose", ["Van lease", "Tool financing", "Insurance premium", "Equipment lease"])
-    amount = st.number_input("Requested amount", min_value=0.0, value=5000.0)
-    if st.button("One-click Financing"):
-        st.json(api_post("/vendor/financing", {"purpose": purpose, "amount": amount}))
+def governance_page() -> None:
+    st.subheader("Community Governance")
+    feature = st.text_input("Feature request")
+    if st.button("Vote Feature"):
+        st.json(api_post("/governance/features", {"feature": feature, "vote": "up"}))
+    st.dataframe(api_get("/governance/features", []), use_container_width=True)
+
+    moderator = st.text_input("Moderator nominee")
+    if st.button("Elect Moderator"):
+        st.json(api_post("/governance/moderators", {"name": moderator, "role": "community_moderator"}))
+    st.dataframe(api_get("/governance/moderators", []), use_container_width=True)
 
 
-def mobile_page() -> None:
-    st.subheader("Mobile + Notifications")
-    st.info("PWA manifest + push notification APIs are enabled for installable mobile workflows.")
-    if st.button("Queue Offline Note"):
-        st.json(queue_offline_action("field_update", {"note": "Completed initial diagnostics"}))
-    conflict = st.text_input("Conflict ID", "CF-001")
-    if st.button("Resolve Sync Conflict"):
-        st.json(api_post("/offline/resolve-conflict", {"conflict_id": conflict, "resolution": "latest_timestamp_wins"}))
-    st.dataframe(api_get("/notifications/push", []), use_container_width=True)
-
-
-def security_page() -> None:
-    st.subheader("Security, Ownership, Governance")
-    p1, p2 = st.columns(2)
-    with p1:
-        if st.button("Save Privacy Settings"):
-            st.json(api_post("/privacy/settings", {"share_analytics": False, "allow_leaderboard": True, "mode": "private-by-default"}))
-        action = st.text_input("Audit action", "updated_escrow")
-        if st.button("Write Audit Log"):
-            st.json(api_post("/audit/logs", {"actor": "owner", "action": action}))
-        st.dataframe(api_get("/audit/logs", []), use_container_width=True)
-    with p2:
-        feat = st.text_input("Feature request", "Crew bulk dispatch")
-        if st.button("Submit Governance Vote"):
-            st.json(api_post("/governance/features", {"feature": feat, "vote": "up"}))
-        st.dataframe(api_get("/governance/features", []), use_container_width=True)
-
-
-def triad_page() -> None:
-    st.subheader("Triad369 Deep Integration")
+def integrations_page() -> None:
+    st.subheader("Public API & Triad Integrations")
+    st.json(api_get("/public/openapi-links", {}))
     st.json(api_get("/triad/sso", {}))
+
     prompt = st.text_area("Agentora prompt")
     if st.button("Agentora Quote"):
         st.json(api_post("/integrations/agentora/quote", {"prompt": prompt}))
-    memo = st.text_area("Memoria note")
-    if st.button("Save Memoria"):
-        st.json(api_post("/integrations/memoria/save", {"note": memo}))
-    litt = st.text_area("LittUp code task")
-    if st.button("Queue LittUp Task"):
-        st.json(api_post("/integrations/littup/code-job", {"task": litt}))
+
+
+def polish_page() -> None:
+    st.subheader("Polish & Performance")
+    if st.button("Queue Offline Action"):
+        st.json(queue_offline_action("job_update", {"note": "arrived onsite"}))
+    if st.button("Run Offline Sync"):
+        st.json(api_post("/offline/sync"))
+    if st.button("Push Test Notification"):
+        st.json(api_post("/notifications/push", {"type": "payment_alert", "message": "Escrow funded"}))
+    st.dataframe(api_get("/notifications/push", []), use_container_width=True)
 
 
 def main() -> None:
     bootstrap_sample_data()
     start_embedded_api()
-    load_css()
-    st.title("🛠️ FieldHaven v0.4")
-    st.caption("Professional, scalable, American-first field tech platform.")
-    top_bar()
+
+    st.title("🛠️ FieldHaven v0.5")
+    st.caption("Production-ready, local-first American platform for field tech ownership and growth.")
+
+    mode = st.sidebar.selectbox("Theme", ["dark", "light"])
+    apply_theme(mode)
 
     page = st.sidebar.radio(
         "Navigate",
-        ["Teams", "Business Intel", "Vendor Hub", "Mobile + Notifications", "Security + Governance", "Triad SSO"],
+        ["AI", "Marketplace", "Reporting", "Governance", "API + Triad", "Polish"],
     )
 
-    if page == "Teams":
-        team_page()
-    elif page == "Business Intel":
-        business_page()
-    elif page == "Vendor Hub":
-        vendor_page()
-    elif page == "Mobile + Notifications":
-        mobile_page()
-    elif page == "Security + Governance":
-        security_page()
+    if page == "AI":
+        ai_page()
+    elif page == "Marketplace":
+        marketplace_page()
+    elif page == "Reporting":
+        reporting_page()
+    elif page == "Governance":
+        governance_page()
+    elif page == "API + Triad":
+        integrations_page()
     else:
-        triad_page()
+        polish_page()
 
 
 if __name__ == "__main__":

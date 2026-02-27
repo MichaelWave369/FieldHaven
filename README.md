@@ -1,32 +1,14 @@
-# FieldHaven v0.4
+# FieldHaven v0.5
 
-FieldHaven v0.4 evolves into a professional, scalable, local-first platform for American field technicians and small crews.
+FieldHaven v0.5 is a production-grade, local-first platform for American field technicians.
 
-## v0.4 Highlights
-
-### 1) Scaling & Team Features
-- Shared crew calendar + assignment APIs.
-- Crew chat and company-style admin workflows.
-
-### 2) Business Intelligence
-- Advanced business analytics: earnings totals, profitability, client patterns, tax reserve estimate.
-- Local AI business advisor for pricing, marketing, and growth strategy.
-
-### 3) Partnerships & Resources
-- Vendor marketplace (tools, parts, vehicles, insurance) with tech-only discounts.
-- One-click financing and equipment leasing prequalification flow.
-
-### 4) Mobile & Notifications
-- PWA-ready UX patterns and push notification APIs.
-- Offline sync plus conflict resolution endpoint.
-
-### 5) Security & Ownership
-- Vault export for full local data ownership.
-- Privacy settings, audit logs, and tech-governed feature voting.
-
-### 6) Triad369 Polish
-- Triad SSO status endpoint for Agentora, Memoria, LittUp.
-- Deeper integration routes for quote/memory/code-job flows.
+## New in v0.5
+- Predictive AI job matching with risk scoring and smart pricing assistant.
+- Full marketplace: tech-to-tech listings and vendor negotiated deals.
+- Advanced reporting: tax report, QuickBooks export, earnings forecast and health score.
+- Community governance: feature voting + elected moderators.
+- Public API discovery endpoint + deeper Triad369 integration readiness.
+- Performance and UX polish: offline sync, push notifications, accessibility-minded dark/light mode toggle.
 
 ## Run
 ```bash

@@ -9,37 +9,36 @@ def test_health_version() -> None:
     client = TestClient(app)
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["version"] == "0.4.0"
+    assert response.json()["version"] == "0.5.0"
 
 
-def test_team_assignment_and_chat() -> None:
+def test_predictive_match_and_pricing() -> None:
     bootstrap_sample_data()
     client = TestClient(app)
-    assign = client.post("/teams/assign", json={"team_id": "TEAM-01", "job_id": "J-1001", "technician": "TechA"})
-    assert assign.status_code == 200
-    cal = client.get("/teams/calendar/TEAM-01")
-    assert cal.status_code == 200
-    assert len(cal.json()) >= 1
 
-    chat = client.post("/teams/chat", json={"team_id": "TEAM-01", "sender": "Lead", "message": "Start dispatch"})
-    assert chat.status_code == 200
-    history = client.get("/teams/chat/TEAM-01")
-    assert history.status_code == 200
-    assert len(history.json()) >= 1
+    match = client.post("/ai/predictive-match", json={"technician": "TechA", "skills": ["POS", "Networking"]})
+    assert match.status_code == 200
+    assert isinstance(match.json(), list)
+    assert "predictive_score" in match.json()[0]
+
+    pricing = client.post("/ai/smart-pricing", json={"service_type": "POS", "labor_hours": 2.0, "parts_cost": 10.0, "urgency": "standard"})
+    assert pricing.status_code == 200
+    assert "recommended_total" in pricing.json()
 
 
-def test_business_and_security_flows() -> None:
+def test_marketplace_reporting_and_governance() -> None:
     bootstrap_sample_data()
     client = TestClient(app)
-    analytics = client.get("/analytics/business")
-    assert analytics.status_code == 200
-    assert "estimated_tax_reserve" in analytics.json()
 
-    vault = client.post("/vault/export")
-    assert vault.status_code == 200
-    assert vault.json()["files"] >= 1
+    post = client.post("/marketplace/tech", json={"seller": "TechB", "category": "Tools", "item": "Tone Probe", "price": 75, "condition": "Used-Good"})
+    assert post.status_code == 200
 
-    vote = client.post("/governance/features", json={"feature": "Crew dispatch board", "vote": "up"})
+    tax = client.get("/reports/tax")
+    assert tax.status_code == 200
+    assert "estimated_tax" in tax.json()
+
+    vote = client.post("/governance/features", json={"feature": "Route optimizer", "vote": "up"})
     assert vote.status_code == 200
-    features = client.get("/governance/features")
-    assert len(features.json()) >= 1
+
+    mods = client.post("/governance/moderators", json={"name": "TechLead", "role": "moderator"})
+    assert mods.status_code == 200
