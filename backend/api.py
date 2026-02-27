@@ -10,36 +10,13 @@ from core.offline_sync import process_sync_queue
 from core.storage import DATA_DIR, backup_data, load_json, save_json
 from services.ai_assistant import ask_local_ollama
 
-app = FastAPI(title="FieldHaven API", version="0.3.0")
+app = FastAPI(title="FieldHaven API", version="0.4.0")
 
 
-class BidRequest(BaseModel):
-    job_id: str
+class JobMatchRequest(BaseModel):
     technician: str
-    bid_amount: float
-    eta_hours: int = 24
-
-
-class AcceptRequest(BaseModel):
-    job_id: str
-    technician: str
-
-
-class SupportTicket(BaseModel):
-    technician: str
-    channel: str
-    issue: str
-
-
-class AIRequest(BaseModel):
-    prompt: str
-    model: str = "llama3.1"
-
-
-class QuoteRequest(BaseModel):
-    scope: str
-    labor_hours: float
-    parts_cost: float = 0.0
+    skills: list[str]
+    fuel_cost_per_mile: float = 0.67
 
 
 class EscrowRequest(BaseModel):
@@ -48,29 +25,27 @@ class EscrowRequest(BaseModel):
     instant_payout: bool = False
 
 
-class JobMatchRequest(BaseModel):
+class QuoteRequest(BaseModel):
+    scope: str
+    labor_hours: float
+    parts_cost: float = 0.0
+
+
+class TeamAssignRequest(BaseModel):
+    team_id: str
+    job_id: str
     technician: str
-    home_zip: str = "00000"
-    skills: list[str]
-    fuel_cost_per_mile: float = 0.67
 
 
-class MarketplaceItem(BaseModel):
-    seller: str
-    item: str
-    price: float
-    condition: str
-
-
-class CertificationReminder(BaseModel):
-    cert: str
-    expiry: str
-    technician: str
+class CrewChatMessage(BaseModel):
+    team_id: str
+    sender: str
+    message: str
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "fieldhaven-api", "version": "0.3.0"}
+    return {"status": "ok", "service": "fieldhaven-api", "version": "0.4.0"}
 
 
 @app.get("/jobs")
@@ -78,98 +53,49 @@ def list_jobs() -> list[dict]:
     return load_json(Path(DATA_DIR / "jobs.json"), [])
 
 
-@app.get("/jobs/route/{job_id}")
-def route_estimate(job_id: str) -> dict:
-    for job in load_json(Path(DATA_DIR / "jobs.json"), []):
-        if job["id"] == job_id:
-            miles = float(job.get("distance_miles", 10))
-            return {"job_id": job_id, "distance_miles": miles, "estimated_drive_minutes": int(miles * 2.1)}
-    return {"message": "job not found"}
-
-
 @app.post("/jobs/match")
 def match_jobs(req: JobMatchRequest) -> list[dict]:
-    recs = []
+    scored: list[dict] = []
     for job in load_json(Path(DATA_DIR / "jobs.json"), []):
         if job.get("status") != "Open":
             continue
-        overlap = len(set(req.skills).intersection(set(job.get("skills", []))))
-        travel = job.get("distance_miles", 20) * req.fuel_cost_per_mile
-        net = job["payout"] - travel
-        score = round(net + (overlap * 75) - (job.get("platform_fee", 0) * 6), 2)
-        recs.append({**job, "match_score": score, "estimated_travel_cost": round(travel, 2), "estimated_net": round(net, 2)})
-    return sorted(recs, key=lambda x: x["match_score"], reverse=True)
+        overlap = len(set(req.skills) & set(job.get("skills", [])))
+        travel = float(job.get("distance_miles", 20)) * req.fuel_cost_per_mile
+        net = float(job["payout"]) - travel
+        score = round(net + overlap * 80 - float(job.get("platform_fee", 0)) * 6, 2)
+        scored.append({**job, "match_score": score, "estimated_net": round(net, 2), "estimated_travel_cost": round(travel, 2)})
+    return sorted(scored, key=lambda j: j["match_score"], reverse=True)
 
 
 @app.post("/jobs/auto-bid")
 def auto_bid(req: JobMatchRequest) -> dict:
-    ranked = match_jobs(req)
-    top = ranked[:2]
-    bids = []
-    store = load_json(Path(DATA_DIR / "bids.json"), [])
-    for job in top:
-        amt = round(job["payout"] * 0.98, 2)
+    ranked = match_jobs(req)[:3]
+    bids = load_json(Path(DATA_DIR / "bids.json"), [])
+    new_bids = []
+    for job in ranked:
         bid = {
             "job_id": job["id"],
             "technician": req.technician,
-            "bid_amount": amt,
+            "bid_amount": round(job["payout"] * 0.98, 2),
             "eta_hours": 24,
-            "ai_reason": ask_local_ollama(f"Explain briefly why this bid is fair for {job['title']}."),
             "created_at": datetime.utcnow().isoformat(),
+            "ai_reason": ask_local_ollama(f"Why is this a fair competitive bid? {job['title']}"),
         }
-        store.append(bid)
+        new_bids.append(bid)
         bids.append(bid)
-    save_json(Path(DATA_DIR / "bids.json"), store)
-    return {"submitted": len(bids), "bids": bids}
-
-
-@app.post("/jobs/bid")
-def submit_bid(req: BidRequest) -> dict:
-    bids_path = Path(DATA_DIR / "bids.json")
-    bids = load_json(bids_path, [])
-    bids.append({**req.model_dump(), "created_at": datetime.utcnow().isoformat()})
-    save_json(bids_path, bids)
-    return {"message": "Bid submitted with transparent terms.", "bid": req.model_dump()}
-
-
-@app.post("/jobs/accept")
-def accept_job(req: AcceptRequest) -> dict:
-    jobs_path = Path(DATA_DIR / "jobs.json")
-    jobs = load_json(jobs_path, [])
-    for job in jobs:
-        if job["id"] == req.job_id and job["status"] == "Open":
-            job["status"] = "Assigned"
-            job["accepted_by"] = req.technician
-            save_json(jobs_path, jobs)
-            return {"message": "Job accepted under FieldHaven fair terms.", "job": job}
-    return {"message": "Job not open or not found."}
-
-
-@app.post("/schedule/auto")
-def smart_schedule() -> dict:
-    jobs = [j for j in load_json(Path(DATA_DIR / "jobs.json"), []) if j["status"] == "Open"]
-    jobs = sorted(jobs, key=lambda j: (j.get("distance_miles", 999), -j.get("payout", 0)))
-    schedule = [{"slot": f"Slot {i}", "job_id": j["id"], "location": j["location"]} for i, j in enumerate(jobs, 1)]
-    save_json(Path(DATA_DIR / "schedule.json"), schedule)
-    return {"message": "Smart schedule generated", "items": len(schedule)}
-
-
-@app.get("/schedule")
-def get_schedule() -> list[dict]:
-    return load_json(Path(DATA_DIR / "schedule.json"), [])
+    save_json(Path(DATA_DIR / "bids.json"), bids)
+    return {"submitted": len(new_bids), "bids": new_bids}
 
 
 @app.post("/quotes/generate")
 def generate_quote(req: QuoteRequest) -> dict:
-    labor_rate = 95.0
-    subtotal = req.labor_hours * labor_rate + req.parts_cost
+    subtotal = req.labor_hours * 95.0 + req.parts_cost
     quote = {
         "id": f"QTE-{datetime.utcnow().strftime('%H%M%S')}",
         "scope": req.scope,
         "subtotal": round(subtotal, 2),
-        "tech_fee_pct": 0.0,
         "total": round(subtotal, 2),
-        "suggested_text": ask_local_ollama(f"Write a concise professional quote for: {req.scope}"),
+        "suggested_text": ask_local_ollama(f"Create professional quote language: {req.scope}"),
     }
     quotes = load_json(Path(DATA_DIR / "quotes.json"), [])
     quotes.append(quote)
@@ -179,20 +105,19 @@ def generate_quote(req: QuoteRequest) -> dict:
 
 @app.post("/payments/escrow")
 def open_escrow(req: EscrowRequest) -> dict:
-    records = load_json(Path(DATA_DIR / "escrow.json"), [])
+    data = load_json(Path(DATA_DIR / "escrow.json"), [])
     fee_pct = 1.5 if req.instant_payout else 0.5
-    payload = {
-        "id": f"E-{len(records)+1:04}",
+    rec = {
+        "id": f"E-{len(data)+1:04}",
         "job_id": req.job_id,
         "amount": req.amount,
         "status": "Funded",
         "instant_payout": req.instant_payout,
         "fee_breakdown": {"platform_fee_pct": fee_pct, "platform_fee_amount": round(req.amount * fee_pct / 100, 2)},
-        "guarantee": "US-backed payout protection after completion verification",
     }
-    records.append(payload)
-    save_json(Path(DATA_DIR / "escrow.json"), records)
-    return payload
+    data.append(rec)
+    save_json(Path(DATA_DIR / "escrow.json"), data)
+    return rec
 
 
 @app.get("/payments/escrow")
@@ -200,150 +125,81 @@ def list_escrow() -> list[dict]:
     return load_json(Path(DATA_DIR / "escrow.json"), [])
 
 
-@app.get("/analytics/earnings")
-def analytics_earnings() -> dict:
-    invoices = load_json(Path(DATA_DIR / "invoices.json"), [])
-    jobs = load_json(Path(DATA_DIR / "jobs.json"), [])
-    by_month = {}
-    for inv in invoices:
-        month = inv.get("generated_on", datetime.utcnow().date().isoformat())[:7]
-        by_month[month] = by_month.get(month, 0) + float(inv.get("amount", 0))
-    heatmap = [{"location": j["location"], "jobs": 1, "avg_payout": j["payout"]} for j in jobs]
-    return {"earnings_by_month": by_month, "job_heatmap": heatmap, "total_jobs": len(jobs)}
-
-
-@app.post("/exports/quickbooks")
-def export_quickbooks() -> dict:
-    invoices = load_json(Path(DATA_DIR / "invoices.json"), [])
-    rows = ["InvoiceID,Client,Amount,Status"]
-    for inv in invoices:
-        rows.append(f"{inv.get('id','')},{inv.get('client','')},{inv.get('amount',0)},{inv.get('status','')}")
-    content = "\n".join(rows)
-    exports = load_json(Path(DATA_DIR / "exports.json"), [])
-    record = {"id": f"X-{len(exports)+1:04}", "kind": "quickbooks_csv", "content": content}
-    exports.append(record)
-    save_json(Path(DATA_DIR / "exports.json"), exports)
-    return record
-
-
-@app.get("/community/posts")
-def list_posts() -> list[dict]:
-    return load_json(Path(DATA_DIR / "community_posts.json"), [])
-
-
-@app.post("/community/mentorship/match")
-def mentorship_match(payload: dict) -> dict:
-    data = load_json(Path(DATA_DIR / "mentor_matches.json"), [])
-    rec = {"id": f"MM-{len(data)+1:04}", **payload, "matched": "US-Mentor-01"}
-    data.append(rec)
-    save_json(Path(DATA_DIR / "mentor_matches.json"), data)
+@app.post("/teams/assign")
+def team_assign(req: TeamAssignRequest) -> dict:
+    assignments = load_json(Path(DATA_DIR / "team_assignments.json"), [])
+    rec = {"id": f"TA-{len(assignments)+1:04}", **req.model_dump(), "assigned_at": datetime.utcnow().isoformat()}
+    assignments.append(rec)
+    save_json(Path(DATA_DIR / "team_assignments.json"), assignments)
     return rec
 
 
-@app.get("/community/success-stories")
-def success_stories() -> list[dict]:
-    return load_json(Path(DATA_DIR / "success_stories.json"), [])
+@app.get("/teams/calendar/{team_id}")
+def team_calendar(team_id: str) -> list[dict]:
+    assignments = load_json(Path(DATA_DIR / "team_assignments.json"), [])
+    return [a for a in assignments if a["team_id"] == team_id]
 
 
-@app.get("/community/leaderboard")
-def leaderboard() -> list[dict]:
-    return load_json(Path(DATA_DIR / "leaderboard.json"), [])
+@app.post("/teams/chat")
+def crew_chat(msg: CrewChatMessage) -> dict:
+    chats = load_json(Path(DATA_DIR / "crew_chat.json"), [])
+    rec = {"id": f"CC-{len(chats)+1:04}", **msg.model_dump(), "created_at": datetime.utcnow().isoformat()}
+    chats.append(rec)
+    save_json(Path(DATA_DIR / "crew_chat.json"), chats)
+    return rec
 
 
-@app.get("/community/events")
-def events() -> list[dict]:
-    return load_json(Path(DATA_DIR / "events.json"), [])
+@app.get("/teams/chat/{team_id}")
+def crew_chat_history(team_id: str) -> list[dict]:
+    chats = load_json(Path(DATA_DIR / "crew_chat.json"), [])
+    return [c for c in chats if c["team_id"] == team_id]
 
 
-@app.get("/clients/ratings")
-def list_client_ratings() -> list[dict]:
-    return load_json(Path(DATA_DIR / "client_ratings.json"), [])
+@app.get("/analytics/business")
+def analytics_business() -> dict:
+    jobs = load_json(Path(DATA_DIR / "jobs.json"), [])
+    invoices = load_json(Path(DATA_DIR / "invoices.json"), [])
+    total_earnings = sum(float(i.get("amount", 0)) for i in invoices)
+    avg_payout = round(sum(float(j.get("payout", 0)) for j in jobs) / max(1, len(jobs)), 2)
+    profitable = sorted(jobs, key=lambda j: float(j.get("payout", 0)) - float(j.get("distance_miles", 0)) * 0.67, reverse=True)[:5]
+    tax_estimate = round(total_earnings * 0.24, 2)
+    return {
+        "total_earnings": total_earnings,
+        "avg_job_payout": avg_payout,
+        "estimated_tax_reserve": tax_estimate,
+        "top_profitable_jobs": profitable,
+        "client_patterns": load_json(Path(DATA_DIR / "client_ratings.json"), []),
+    }
 
 
-@app.post("/disputes/vote")
-def dispute_vote(vote: dict) -> dict:
-    disputes = load_json(Path(DATA_DIR / "disputes.json"), [])
-    did = vote.get("dispute_id", "D-0001")
-    target = next((d for d in disputes if d.get("id") == did), None)
-    if target is None:
-        target = {"id": did, "votes": [], "status": "Open", "mediator": "US Neutral Mediator"}
-        disputes.append(target)
-    target["votes"].append(vote)
-    save_json(Path(DATA_DIR / "disputes.json"), disputes)
-    return {"message": "Community vote recorded", "dispute": target}
+@app.post("/advisor/business")
+def ai_business_advisor(payload: dict) -> dict:
+    context = payload.get("context", "pricing, marketing, growth")
+    response = ask_local_ollama(f"As an American field service business advisor, suggest 5 actions for: {context}")
+    return {"advisor": "local-ai", "response": response}
 
 
-@app.get("/insurance/marketplace")
-def insurance_marketplace() -> list[dict]:
-    data = load_json(Path(DATA_DIR / "insurance_marketplace.json"), [])
+@app.get("/vendor/marketplace")
+def vendor_marketplace() -> list[dict]:
+    data = load_json(Path(DATA_DIR / "vendor_marketplace.json"), [])
     if not data:
         data = [
-            {"carrier": "Liberty Tech Shield", "product": "General Liability", "rate_note": "Tech-friendly monthly options"},
-            {"carrier": "US Bond Works", "product": "Performance Bond", "rate_note": "Discounts for verified track record"},
+            {"vendor": "USA Tool Direct", "category": "Tools", "discount": "12% tech-only"},
+            {"vendor": "Patriot Fleet Vans", "category": "Vehicles", "discount": "Lease rebates"},
+            {"vendor": "ShieldLine Insurance", "category": "Insurance", "discount": "Preferred tech rates"},
+            {"vendor": "American Parts Grid", "category": "Parts", "discount": "Bulk crew pricing"},
         ]
-        save_json(Path(DATA_DIR / "insurance_marketplace.json"), data)
+        save_json(Path(DATA_DIR / "vendor_marketplace.json"), data)
     return data
 
 
-@app.get("/equipment/marketplace")
-def equipment_marketplace() -> list[dict]:
-    return load_json(Path(DATA_DIR / "equipment_marketplace.json"), [])
-
-
-@app.post("/equipment/marketplace")
-def add_equipment(item: MarketplaceItem) -> dict:
-    data = load_json(Path(DATA_DIR / "equipment_marketplace.json"), [])
-    rec = {"id": f"EQ-{len(data)+1:03}", **item.model_dump()}
-    data.append(rec)
-    save_json(Path(DATA_DIR / "equipment_marketplace.json"), data)
+@app.post("/vendor/financing")
+def vendor_financing(payload: dict) -> dict:
+    requests = load_json(Path(DATA_DIR / "financing_requests.json"), [])
+    rec = {"id": f"F-{len(requests)+1:04}", **payload, "status": "prequalified", "created_at": datetime.utcnow().isoformat()}
+    requests.append(rec)
+    save_json(Path(DATA_DIR / "financing_requests.json"), requests)
     return rec
-
-
-@app.post("/compliance/certifications")
-def add_certification(reminder: CertificationReminder) -> dict:
-    data = load_json(Path(DATA_DIR / "certifications.json"), [])
-    rec = {"id": f"C-{len(data)+1:03}", **reminder.model_dump(), "reminder_sent": False}
-    data.append(rec)
-    save_json(Path(DATA_DIR / "certifications.json"), data)
-    return rec
-
-
-@app.get("/compliance/certifications")
-def list_certifications() -> list[dict]:
-    return load_json(Path(DATA_DIR / "certifications.json"), [])
-
-
-@app.post("/support/ticket")
-def create_support_ticket(ticket: SupportTicket) -> dict:
-    tickets = load_json(Path(DATA_DIR / "tickets.json"), [])
-    payload = {**ticket.model_dump(), "id": f"T-{len(tickets)+1:04}", "created_at": datetime.utcnow().isoformat(), "sla": "US-human callback <2 business hours"}
-    tickets.append(payload)
-    save_json(Path(DATA_DIR / "tickets.json"), tickets)
-    return payload
-
-
-@app.post("/support/live-chat")
-def live_chat(msg: dict) -> dict:
-    chats = load_json(Path(DATA_DIR / "chat_messages.json"), [])
-    payload = {"id": f"C-{len(chats)+1:04}", **msg, "agent": "US Support Team", "response": "US support specialist connected."}
-    chats.append(payload)
-    save_json(Path(DATA_DIR / "chat_messages.json"), chats)
-    return payload
-
-
-@app.get("/support/knowledge-base")
-def knowledge_base() -> list[dict]:
-    return load_json(Path(DATA_DIR / "knowledge_base.json"), [])
-
-
-@app.post("/support/emergency")
-def emergency_help() -> dict:
-    return {"message": "Emergency escalation opened", "phone": "1-800-FIELD-US", "created_at": datetime.utcnow().isoformat()}
-
-
-@app.post("/assistant")
-def assistant(req: AIRequest) -> dict:
-    return {"response": ask_local_ollama(req.prompt, req.model)}
 
 
 @app.post("/offline/sync")
@@ -351,14 +207,84 @@ def sync_offline() -> dict:
     return process_sync_queue()
 
 
+@app.post("/offline/resolve-conflict")
+def resolve_conflict(payload: dict) -> dict:
+    log = load_json(Path(DATA_DIR / "sync_conflicts.json"), [])
+    rec = {"id": f"SC-{len(log)+1:04}", **payload, "resolved_at": datetime.utcnow().isoformat()}
+    log.append(rec)
+    save_json(Path(DATA_DIR / "sync_conflicts.json"), log)
+    return rec
+
+
+@app.get("/notifications/push")
+def push_notifications() -> list[dict]:
+    return load_json(Path(DATA_DIR / "notifications.json"), [])
+
+
+@app.post("/notifications/push")
+def create_push_notification(payload: dict) -> dict:
+    notes = load_json(Path(DATA_DIR / "notifications.json"), [])
+    rec = {"id": f"N-{len(notes)+1:04}", **payload, "created_at": datetime.utcnow().isoformat()}
+    notes.append(rec)
+    save_json(Path(DATA_DIR / "notifications.json"), notes)
+    return rec
+
+
+@app.post("/vault/export")
+def vault_export() -> dict:
+    snapshot = {}
+    for p in Path(DATA_DIR).glob("*.json"):
+        snapshot[p.name] = load_json(p, [])
+    exports = load_json(Path(DATA_DIR / "vault_exports.json"), [])
+    rec = {"id": f"V-{len(exports)+1:04}", "created_at": datetime.utcnow().isoformat(), "files": len(snapshot), "snapshot": snapshot}
+    exports.append(rec)
+    save_json(Path(DATA_DIR / "vault_exports.json"), exports)
+    return {"id": rec["id"], "created_at": rec["created_at"], "files": rec["files"]}
+
+
+@app.post("/privacy/settings")
+def privacy_settings(payload: dict) -> dict:
+    save_json(Path(DATA_DIR / "privacy_settings.json"), payload)
+    return payload
+
+
+@app.get("/audit/logs")
+def audit_logs() -> list[dict]:
+    return load_json(Path(DATA_DIR / "audit_logs.json"), [])
+
+
+@app.post("/audit/logs")
+def create_audit_log(payload: dict) -> dict:
+    logs = load_json(Path(DATA_DIR / "audit_logs.json"), [])
+    rec = {"id": f"A-{len(logs)+1:04}", **payload, "timestamp": datetime.utcnow().isoformat()}
+    logs.append(rec)
+    save_json(Path(DATA_DIR / "audit_logs.json"), logs)
+    return rec
+
+
+@app.get("/governance/features")
+def governance_features() -> list[dict]:
+    return load_json(Path(DATA_DIR / "feature_votes.json"), [])
+
+
+@app.post("/governance/features")
+def governance_vote(payload: dict) -> dict:
+    votes = load_json(Path(DATA_DIR / "feature_votes.json"), [])
+    rec = {"id": f"GV-{len(votes)+1:04}", **payload, "created_at": datetime.utcnow().isoformat()}
+    votes.append(rec)
+    save_json(Path(DATA_DIR / "feature_votes.json"), votes)
+    return rec
+
+
+@app.get("/triad/sso")
+def triad_sso() -> dict:
+    return {"agentora": "connected", "memoria": "connected", "littup": "connected", "mode": "local-dev-sso"}
+
+
 @app.post("/integrations/agentora/quote")
-def agentora_quote(req: AIRequest) -> dict:
-    return {"provider": "Agentora", "response": ask_local_ollama(req.prompt, req.model)}
-
-
-@app.post("/integrations/agentora/troubleshoot")
-def agentora_troubleshoot(req: AIRequest) -> dict:
-    return {"provider": "Agentora", "response": ask_local_ollama(req.prompt, req.model)}
+def agentora_quote(payload: dict) -> dict:
+    prompt = payload.get("prompt", "")
+    return {"provider": "Agentora", "response": ask_local_ollama(prompt)}
 
 
 @app.post("/integrations/memoria/save")
@@ -373,6 +299,21 @@ def memoria_save(payload: dict) -> dict:
 @app.post("/integrations/littup/code-job")
 def littup_code_job(payload: dict) -> dict:
     return {"provider": "LittUp", "status": "queued", "payload": payload}
+
+
+@app.get("/resources")
+def resources() -> list[dict]:
+    return load_json(Path(DATA_DIR / "resources.json"), [])
+
+
+@app.get("/community/posts")
+def community_posts() -> list[dict]:
+    return load_json(Path(DATA_DIR / "community_posts.json"), [])
+
+
+@app.post("/support/emergency")
+def emergency_help() -> dict:
+    return {"message": "Emergency escalation opened", "phone": "1-800-FIELD-US", "created_at": datetime.utcnow().isoformat()}
 
 
 @app.post("/backup")

@@ -1,43 +1,37 @@
-# FieldHaven v0.3
+# FieldHaven v0.4
 
-FieldHaven is an American-first, open-source, local-first platform built to help independent field technicians thrive.
+FieldHaven v0.4 evolves into a professional, scalable, local-first platform for American field technicians and small crews.
 
-## v0.3 Upgrades
+## v0.4 Highlights
 
-### 1) Smart Job Matching & AI Assistant
-- AI-powered job recommendations based on skills, pay, distance, and travel cost.
-- AI auto-bidding for top matched jobs.
-- Earnings optimizer suggestions in the dashboard.
+### 1) Scaling & Team Features
+- Shared crew calendar + assignment APIs.
+- Crew chat and company-style admin workflows.
 
-### 2) Advanced Tech Tools
-- Mobile-first PWA readiness with install manifest template.
-- QuickBooks export endpoint.
-- Community equipment marketplace for buying/selling tools.
-- Compliance and certification tracker with reminder records.
+### 2) Business Intelligence
+- Advanced business analytics: earnings totals, profitability, client patterns, tax reserve estimate.
+- Local AI business advisor for pricing, marketing, and growth strategy.
 
-### 3) Earnings & Protection
-- Escrow payment guarantee with optional instant payout.
-- Transparent fee breakdown on escrow records.
-- Dispute workflow with neutral American mediator attribution.
-- Insurance and bonding marketplace feed.
+### 3) Partnerships & Resources
+- Vendor marketplace (tools, parts, vehicles, insurance) with tech-only discounts.
+- One-click financing and equipment leasing prequalification flow.
 
-### 4) Community Growth
-- Tech-only private forum feed and mentorship matching.
-- Success stories and opt-in leaderboard.
-- Local meetup and training event calendar.
+### 4) Mobile & Notifications
+- PWA-ready UX patterns and push notification APIs.
+- Offline sync plus conflict resolution endpoint.
 
-### 5) Triad369 + Analytics
-- Deeper Agentora / Memoria / LittUp integration endpoints.
-- Analytics endpoint for earnings-over-time and job heat map data.
-- Performance-oriented local JSON APIs and offline sync support.
+### 5) Security & Ownership
+- Vault export for full local data ownership.
+- Privacy settings, audit logs, and tech-governed feature voting.
 
-## Quick Start
+### 6) Triad369 Polish
+- Triad SSO status endpoint for Agentora, Memoria, LittUp.
+- Deeper integration routes for quote/memory/code-job flows.
+
+## Run
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 streamlit run app.py
 ```
-
-## Privacy + Local-first
-FieldHaven stores operational data locally (`data/*.json`) and can be self-hosted by local tech communities.
