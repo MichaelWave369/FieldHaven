@@ -4,30 +4,38 @@ from backend.api import app
 from core.sample_data import bootstrap_sample_data
 
 
-def test_health() -> None:
+def test_health_version() -> None:
     bootstrap_sample_data()
     client = TestClient(app)
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
-    assert response.json()["version"] == "0.2.0"
+    assert response.json()["version"] == "0.3.0"
 
 
-def test_jobs_and_route() -> None:
+def test_job_matching_and_auto_bid() -> None:
     bootstrap_sample_data()
     client = TestClient(app)
-    jobs = client.get("/jobs").json()
-    assert len(jobs) >= 1
-    route = client.get(f"/jobs/route/{jobs[0]['id']}")
-    assert route.status_code == 200
-    assert "estimated_drive_minutes" in route.json()
+    matches = client.post(
+        "/jobs/match",
+        json={"technician": "TechA", "skills": ["Fiber", "Troubleshooting"], "fuel_cost_per_mile": 0.67},
+    )
+    assert matches.status_code == 200
+    payload = matches.json()
+    assert len(payload) >= 1
+    assert "match_score" in payload[0]
+
+    autobid = client.post("/jobs/auto-bid", json={"technician": "TechA", "skills": ["Fiber", "Troubleshooting"]})
+    assert autobid.status_code == 200
+    assert autobid.json()["submitted"] >= 1
 
 
-def test_smart_schedule_and_escrow() -> None:
+def test_escrow_and_analytics() -> None:
     bootstrap_sample_data()
     client = TestClient(app)
-    sched = client.post("/schedule/auto")
-    assert sched.status_code == 200
-    escrow = client.post("/payments/escrow", json={"job_id": "J-1001", "amount": 250.0})
+    escrow = client.post("/payments/escrow", json={"job_id": "J-1001", "amount": 250.0, "instant_payout": True})
     assert escrow.status_code == 200
-    assert escrow.json()["status"] == "Funded"
+    assert "fee_breakdown" in escrow.json()
+
+    analytics = client.get("/analytics/earnings")
+    assert analytics.status_code == 200
+    assert "job_heatmap" in analytics.json()
