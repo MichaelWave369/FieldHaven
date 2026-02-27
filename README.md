@@ -1,14 +1,17 @@
-# FieldHaven v0.5
+# FieldHaven v0.6
 
-FieldHaven v0.5 is a production-grade, local-first platform for American field technicians.
+FieldHaven v0.6 is a mature, scalable, local-first American field tech platform with premium-grade tools.
 
-## New in v0.5
-- Predictive AI job matching with risk scoring and smart pricing assistant.
-- Full marketplace: tech-to-tech listings and vendor negotiated deals.
-- Advanced reporting: tax report, QuickBooks export, earnings forecast and health score.
-- Community governance: feature voting + elected moderators.
-- Public API discovery endpoint + deeper Triad369 integration readiness.
-- Performance and UX polish: offline sync, push notifications, accessibility-minded dark/light mode toggle.
+## v0.6 Highlights
+- Full PWA configuration and install-ready manifest endpoints.
+- Background sync and offline-first operations.
+- Tech-friendly monetization: premium tiers + revenue share rewards.
+- National tech directory with verified profiles and reputation scores.
+- Client reviews focused on protecting quality technicians.
+- Local AI business coach for growth, pricing, marketing, and tax strategy.
+- Enterprise company accounts + official insurance/financing/tool partnerships.
+- Security audit API, full vault export, events calendar, certification programs.
+- Deeper Triad369 + public API integration readiness.
 
 ## Run
 ```bash

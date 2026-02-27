@@ -4,41 +4,47 @@ from backend.api import app
 from core.sample_data import bootstrap_sample_data
 
 
-def test_health_version() -> None:
+def test_health_and_pwa() -> None:
     bootstrap_sample_data()
     client = TestClient(app)
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json()["version"] == "0.5.0"
+    health = client.get("/health")
+    assert health.status_code == 200
+    assert health.json()["version"] == "0.6.0"
+
+    pwa = client.get("/pwa/config")
+    assert pwa.status_code == 200
+    assert pwa.json()["installable"] is True
 
 
-def test_predictive_match_and_pricing() -> None:
-    bootstrap_sample_data()
-    client = TestClient(app)
-
-    match = client.post("/ai/predictive-match", json={"technician": "TechA", "skills": ["POS", "Networking"]})
-    assert match.status_code == 200
-    assert isinstance(match.json(), list)
-    assert "predictive_score" in match.json()[0]
-
-    pricing = client.post("/ai/smart-pricing", json={"service_type": "POS", "labor_hours": 2.0, "parts_cost": 10.0, "urgency": "standard"})
-    assert pricing.status_code == 200
-    assert "recommended_total" in pricing.json()
-
-
-def test_marketplace_reporting_and_governance() -> None:
+def test_monetization_and_directory() -> None:
     bootstrap_sample_data()
     client = TestClient(app)
 
-    post = client.post("/marketplace/tech", json={"seller": "TechB", "category": "Tools", "item": "Tone Probe", "price": 75, "condition": "Used-Good"})
-    assert post.status_code == 200
+    sub = client.post("/monetization/subscribe", json={"technician": "TechA", "tier": "premium_plus"})
+    assert sub.status_code == 200
 
-    tax = client.get("/reports/tax")
-    assert tax.status_code == 200
-    assert "estimated_tax" in tax.json()
+    rev = client.post("/monetization/revenue-share", json={"technician": "TechA", "community_actions": 10})
+    assert rev.status_code == 200
+    assert rev.json()["reward_credit"] > 0
 
-    vote = client.post("/governance/features", json={"feature": "Route optimizer", "vote": "up"})
-    assert vote.status_code == 200
+    prof = client.post("/directory/techs", json={"technician": "TechB", "state": "TX", "skills": ["POS"], "verified": True})
+    assert prof.status_code == 200
+    assert "reputation_score" in prof.json()
 
-    mods = client.post("/governance/moderators", json={"name": "TechLead", "role": "moderator"})
-    assert mods.status_code == 200
+
+def test_ai_enterprise_security() -> None:
+    bootstrap_sample_data()
+    client = TestClient(app)
+
+    coach = client.post("/ai/business-coach", json={"context": "grow revenue"})
+    assert coach.status_code == 200
+
+    company = client.post("/enterprise/company-accounts", json={"name": "CrewCo", "owner": "OwnerA", "size": 3})
+    assert company.status_code == 200
+
+    audit = client.post("/security/audit/log", json={"actor": "system", "event": "check"})
+    assert audit.status_code == 200
+
+    vault = client.post("/vault/export")
+    assert vault.status_code == 200
+    assert vault.json()["files"] >= 1
