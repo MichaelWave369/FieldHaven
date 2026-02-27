@@ -1,0 +1,21 @@
+{
+  "name": "FieldHaven",
+  "short_name": "FieldHaven",
+  "description": "American Field Tech Haven - local-first and private.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0d14",
+  "theme_color": "#e63946",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
