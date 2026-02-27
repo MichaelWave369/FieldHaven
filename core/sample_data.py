@@ -14,7 +14,8 @@ SAMPLE_JOBS = [
         "platform_fee": 0.0,
         "location": "Dallas, TX",
         "status": "Open",
-        "description": "Swap 3 legacy POS terminals with new encrypted units. Includes test and photo proof.",
+        "distance_miles": 18,
+        "description": "Swap 3 legacy POS terminals with new encrypted units.",
     },
     {
         "id": "J-1002",
@@ -24,7 +25,8 @@ SAMPLE_JOBS = [
         "platform_fee": 5.0,
         "location": "Tulsa, OK",
         "status": "Open",
-        "description": "Diagnose intermittent packet loss and replace damaged patch panel if required.",
+        "distance_miles": 32,
+        "description": "Diagnose packet loss and replace damaged patch panel if required.",
     },
     {
         "id": "J-1003",
@@ -34,21 +36,14 @@ SAMPLE_JOBS = [
         "platform_fee": 0.0,
         "location": "Phoenix, AZ",
         "status": "Assigned",
-        "description": "Mount and configure 4 lobby displays. Validate remote monitoring dashboard.",
+        "distance_miles": 8,
+        "description": "Mount and configure 4 lobby displays.",
     },
 ]
 
 SAMPLE_CLIENT_RATINGS = [
-    {
-        "client": "Lone Star Retail Group",
-        "rating": 4.7,
-        "notes": "Pays on time and scope is clear.",
-    },
-    {
-        "client": "Heartland Fiber",
-        "rating": 3.2,
-        "notes": "Supportive PM, but dispatch instructions can change last minute.",
-    },
+    {"client": "Lone Star Retail Group", "rating": 4.7, "notes": "Pays on time and scope is clear."},
+    {"client": "Heartland Fiber", "rating": 3.2, "notes": "PMs helpful; dispatch notes can drift."},
 ]
 
 SAMPLE_COMMUNITY_POSTS = [
@@ -56,14 +51,30 @@ SAMPLE_COMMUNITY_POSTS = [
         "author": "TechRangerTX",
         "topic": "Safety",
         "title": "Checklist before rooftop jobs",
-        "body": "Always confirm ladder anchor points and weather before dispatch confirmation.",
+        "body": "Confirm anchors, weather, and local contacts before dispatch acceptance.",
     },
     {
         "author": "FiberMomUSA",
-        "topic": "Client Alerts",
-        "title": "Watch out: missing access notes",
-        "body": "A national chain in OKC has recurring lockout issues. Ask for local manager contact early.",
+        "topic": "Mentoring",
+        "title": "New tech mentoring thread",
+        "body": "Weekly live mentoring for new 1099 techs covering scope, invoicing, and safety.",
     },
+]
+
+SAMPLE_KB = [
+    {"title": "How escrow works", "category": "Payments", "content": "Funds are reserved before dispatch."},
+    {"title": "Emergency protocol", "category": "Safety", "content": "Use emergency button then call US support."},
+]
+
+SAMPLE_SUCCESS_STORIES = [
+    {"tech": "Alex-Reno", "story": "Raised monthly income 31% using smart scheduling + transparent jobs."}
+]
+
+SAMPLE_RESOURCES = [
+    {"type": "Tax Tips", "name": "Quarterly 1099 Tax Checklist"},
+    {"type": "Insurance", "name": "General Liability Starter Guide"},
+    {"type": "Training", "name": "Fiber Certification Path"},
+    {"type": "Legal", "name": "Independent Contractor Rights (US)"},
 ]
 
 
@@ -72,13 +83,21 @@ def bootstrap_sample_data() -> None:
         "jobs.json": SAMPLE_JOBS,
         "client_ratings.json": SAMPLE_CLIENT_RATINGS,
         "community_posts.json": SAMPLE_COMMUNITY_POSTS,
+        "knowledge_base.json": SAMPLE_KB,
+        "success_stories.json": SAMPLE_SUCCESS_STORIES,
+        "resources.json": SAMPLE_RESOURCES,
         "job_logs.json": [],
         "invoices.json": [],
         "tickets.json": [],
         "certifications.json": [],
         "disputes.json": [],
+        "chat_messages.json": [],
+        "quotes.json": [],
+        "schedule.json": [],
+        "escrow.json": [],
+        "sync_queue.json": [],
+        "memoria.json": [],
     }
-
     for filename, payload in defaults.items():
         target = Path(DATA_DIR / filename)
         if not target.exists():

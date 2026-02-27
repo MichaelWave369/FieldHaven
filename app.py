@@ -7,29 +7,21 @@ import requests
 import streamlit as st
 
 from backend.server import start_embedded_api
+from core.offline_sync import queue_offline_action
 from core.sample_data import bootstrap_sample_data
 from core.storage import DATA_DIR, load_json, save_json
 from services.ai_assistant import ask_local_ollama
 
-st.set_page_config(page_title="FieldHaven v0.1", page_icon="🛠️", layout="wide")
+API_BASE = "http://127.0.0.1:8008"
+st.set_page_config(page_title="FieldHaven v0.2", page_icon="🛠️", layout="wide")
 
 
 def load_css() -> None:
     st.markdown(
         """
         <style>
-        .stApp {
-            background: radial-gradient(circle at 10% 20%, #1f2430 0%, #10131c 45%, #080a11 100%);
-            color: #f5f5f5;
-        }
-        .fh-card {
-            border: 1px solid rgba(255,255,255,0.09);
-            border-left: 4px solid #e63946;
-            background: rgba(255,255,255,0.03);
-            padding: 1rem;
-            border-radius: 14px;
-            margin-bottom: 0.8rem;
-        }
+        .stApp {background: radial-gradient(circle at 10% 20%, #1f2430 0%, #10131c 45%, #080a11 100%); color: #f5f5f5;}
+        .fh-card {border: 1px solid rgba(255,255,255,0.09); border-left: 4px solid #e63946; background: rgba(255,255,255,0.03); padding: 1rem; border-radius: 14px; margin-bottom: 0.8rem;}
         .fh-accent { color: #ffd166; font-weight: 700; }
         .fh-subtle { color: #98a4b3; }
         </style>
@@ -38,156 +30,167 @@ def load_css() -> None:
     )
 
 
-def api_get(endpoint: str, fallback: list[dict] | None = None):
+def api_get(endpoint: str, fallback=None):
     try:
-        return requests.get(f"http://127.0.0.1:8008{endpoint}", timeout=2).json()
+        return requests.get(f"{API_BASE}{endpoint}", timeout=3).json()
     except Exception:
         return fallback if fallback is not None else []
 
 
-def market_view() -> None:
-    st.subheader("Fair Job Marketplace")
-    st.caption("Transparent pay. Low/zero tech fees. American support built in.")
-    jobs = api_get("/jobs", load_json(Path(DATA_DIR / "jobs.json"), []))
-    cols = st.columns(3)
-    for idx, job in enumerate(jobs):
-        with cols[idx % 3]:
-            st.markdown(
-                f"""
-                <div class='fh-card'>
-                    <div class='fh-accent'>{job['title']}</div>
-                    <div>{job['location']} • {job['client']}</div>
-                    <div>Payout: <b>${job['payout']:.2f}</b> | Tech fee: <b>{job['platform_fee']}%</b></div>
-                    <div class='fh-subtle'>{job['description']}</div>
-                    <div>Status: {job['status']}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-    with st.expander("Bid / Direct Accept"):
-        tech_name = st.text_input("Technician Name", key="bid_tech")
-        job_id = st.text_input("Job ID", key="job_id")
-        bid = st.number_input("Bid Amount", min_value=0.0, value=250.0)
-        eta = st.number_input("ETA (hours)", min_value=1, value=24)
-        c1, c2 = st.columns(2)
-        if c1.button("Submit Bid"):
-            payload = {"job_id": job_id, "technician": tech_name, "bid_amount": bid, "eta_hours": int(eta)}
-            response = requests.post("http://127.0.0.1:8008/jobs/bid", json=payload, timeout=3).json()
-            st.success(response["message"])
-        if c2.button("Direct Accept"):
-            payload = {"job_id": job_id, "technician": tech_name}
-            response = requests.post("http://127.0.0.1:8008/jobs/accept", json=payload, timeout=3).json()
-            st.info(response["message"])
+def api_post(endpoint: str, payload=None, fallback=None):
+    try:
+        return requests.post(f"{API_BASE}{endpoint}", json=payload or {}, timeout=4).json()
+    except Exception:
+        return fallback if fallback is not None else {"message": "offline"}
 
 
-def tools_view() -> None:
-    st.subheader("Tech Tools Suite")
-    tab1, tab2, tab3, tab4 = st.tabs(["Offline Logs", "Invoicing", "Tax & Docs", "Training & Safety"])
-    with tab1:
-        start = st.time_input("Start", key="log_start")
-        end = st.time_input("End", key="log_end")
-        notes = st.text_area("Work Notes", key="log_notes")
-        if st.button("Save Local Job Log"):
-            logs_path = Path(DATA_DIR / "job_logs.json")
-            logs = load_json(logs_path, [])
-            logs.append({"date": str(date.today()), "start": str(start), "end": str(end), "notes": notes})
-            save_json(logs_path, logs)
-            st.success("Saved locally for offline-first workflow.")
-    with tab2:
-        st.write("Generate fast invoices and track payout guarantees.")
-        client = st.text_input("Client", key="inv_client")
-        amount = st.number_input("Amount", min_value=0.0, value=325.0, key="inv_amt")
-        if st.button("Generate Invoice"):
-            invoices = load_json(Path(DATA_DIR / "invoices.json"), [])
-            invoice = {
-                "id": f"INV-{len(invoices)+1:04}",
-                "client": client,
-                "amount": amount,
-                "status": "Escrow Pending",
-                "generated_on": str(date.today()),
-            }
-            invoices.append(invoice)
-            save_json(Path(DATA_DIR / "invoices.json"), invoices)
-            st.json(invoice)
-    with tab3:
-        income = st.number_input("Estimated annual 1099 income", min_value=0.0, value=65000.0)
-        rate = st.slider("Tax reserve %", 10, 40, 24)
-        reserve = income * (rate / 100)
-        st.metric("Suggested tax reserve", f"${reserve:,.2f}")
-        st.markdown("Document templates are available in `/templates` for invoice, dispute, and safety plans.")
-    with tab4:
-        cert = st.text_input("Certification Name")
-        expiry = st.date_input("Expiration Date")
-        if st.button("Track Certification"):
-            certs = load_json(Path(DATA_DIR / "certifications.json"), [])
-            certs.append({"cert": cert, "expiry": str(expiry)})
-            save_json(Path(DATA_DIR / "certifications.json"), certs)
-            st.success("Certification tracked.")
-        st.info("Insurance marketplace integration hooks ready for preferred US carriers.")
-
-
-def support_and_community_view() -> None:
-    st.subheader("American Support + Community Protection")
-    left, right = st.columns(2)
-    with left:
-        st.markdown("### Real Humans in the US")
-        st.write("Chat, phone, and ticket support handled by US-based human teams.")
-        tech = st.text_input("Technician", key="ticket_tech")
-        channel = st.selectbox("Channel", ["Chat", "Phone", "Ticket"])
-        issue = st.text_area("Issue")
-        if st.button("Open Support Ticket"):
-            payload = {"technician": tech, "channel": channel, "issue": issue}
-            response = requests.post("http://127.0.0.1:8008/support/ticket", json=payload, timeout=3).json()
-            st.success(f"Ticket {response['id']} created")
-            st.caption(response["sla"])
-
-        st.markdown("### Local AI Assistant (Ollama)")
-        prompt = st.text_area("Ask for quote, troubleshooting plan, or invoice wording")
-        if st.button("Ask Assistant"):
-            st.write(ask_local_ollama(prompt))
-
-    with right:
-        st.markdown("### Rate the Client")
-        ratings = api_get("/clients/ratings", [])
-        st.dataframe(ratings, use_container_width=True)
-
-        st.markdown("### Private Tech Community")
-        posts = api_get("/community/posts", [])
-        for post in posts:
-            st.markdown(f"**{post['title']}** — {post['author']}")
-            st.caption(post["body"])
-
-        st.markdown("### Dispute Resolution")
-        st.write("Community voting or neutral arbitration options are available for payment/scope disputes.")
-
-
-def integration_view() -> None:
-    st.subheader("Triad369 Integration")
-    st.markdown("- Agentora/Memoria SSO hook points pre-wired.")
-    st.markdown("- Agentora task hooks can assist with quote generation and troubleshooting.")
-    st.code(
-        """
-POST /hooks/agentora/quote
-POST /hooks/agentora/troubleshoot
-GET  /auth/memoria/callback
-        """
-    )
-    if st.button("Create Local Backup"):
-        response = requests.post("http://127.0.0.1:8008/backup", timeout=3).json()
-        st.success(response["message"])
-        st.caption(response["file"])
+def quick_actions() -> None:
+    c1, c2, c3, c4 = st.columns(4)
+    if c1.button("🚨 Emergency Help", use_container_width=True):
+        st.error(api_post("/support/emergency")["message"])
+    if c2.button("🔄 Sync Offline Queue", use_container_width=True):
+        st.success(str(api_post("/offline/sync")))
+    if c3.button("💾 Backup", use_container_width=True):
+        st.info(api_post("/backup")["file"])
+    if c4.button("📅 Smart Schedule", use_container_width=True):
+        st.success(api_post("/schedule/auto")["message"])
 
 
 def dashboard_header() -> None:
-    st.title("🛠️ FieldHaven v0.1")
-    st.caption("The American Field Tech Haven — fair marketplace, real US support, local-first privacy.")
-    k1, k2, k3, k4 = st.columns(4)
+    st.title("🛠️ FieldHaven v0.2")
+    st.caption("American-first, local-first platform for independent field tech success.")
+    quick_actions()
     jobs = load_json(Path(DATA_DIR / "jobs.json"), [])
-    open_jobs = len([j for j in jobs if j["status"] == "Open"])
-    k1.metric("Open Jobs", open_jobs)
+    invoices = load_json(Path(DATA_DIR / "invoices.json"), [])
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Open Jobs", len([j for j in jobs if j["status"] == "Open"]))
     k2.metric("Avg Payout", f"${sum(j['payout'] for j in jobs)/max(1,len(jobs)):.0f}")
-    k3.metric("Tech Fees", "0-5%")
-    k4.metric("Support Region", "USA")
+    k3.metric("Total Earnings", f"${sum(i['amount'] for i in invoices):,.2f}")
+    k4.metric("Tech Fee", "0-5%")
+
+
+def job_marketplace() -> None:
+    st.subheader("Advanced Job Tools")
+    jobs = api_get("/jobs", load_json(Path(DATA_DIR / "jobs.json"), []))
+    for job in jobs:
+        route = api_get(f"/jobs/route/{job['id']}", {})
+        st.markdown(
+            f"<div class='fh-card'><div class='fh-accent'>{job['title']}</div>"
+            f"<div>{job['location']} • {job['client']}</div>"
+            f"<div>Payout <b>${job['payout']:.2f}</b> | Tech fee <b>{job['platform_fee']}%</b> | Drive est <b>{route.get('estimated_drive_minutes','-')} min</b></div>"
+            f"<div class='fh-subtle'>{job['description']}</div></div>",
+            unsafe_allow_html=True,
+        )
+    with st.expander("Bid / Direct Accept"):
+        tech_name = st.text_input("Technician Name")
+        job_id = st.text_input("Job ID")
+        bid = st.number_input("Bid Amount", min_value=0.0, value=250.0)
+        if st.button("Submit Bid"):
+            res = api_post("/jobs/bid", {"job_id": job_id, "technician": tech_name, "bid_amount": bid, "eta_hours": 24})
+            st.success(res["message"])
+        if st.button("Direct Accept"):
+            res = api_post("/jobs/accept", {"job_id": job_id, "technician": tech_name})
+            st.info(res["message"])
+
+
+def tools_suite() -> None:
+    st.subheader("Tools Suite: Offline, Quote, Invoices")
+    t1, t2, t3 = st.tabs(["Offline Mode", "Quick Quote (AI)", "Invoices + Escrow"])
+    with t1:
+        notes = st.text_area("Offline job note")
+        if st.button("Save Offline Event"):
+            item = queue_offline_action("job_log", {"date": str(date.today()), "notes": notes})
+            st.success(f"Queued {item['id']}")
+        st.json(load_json(Path(DATA_DIR / "sync_queue.json"), []))
+    with t2:
+        scope = st.text_area("Scope")
+        hrs = st.number_input("Labor hours", min_value=0.5, value=2.0)
+        parts = st.number_input("Parts cost", min_value=0.0, value=0.0)
+        if st.button("Generate Quote"):
+            quote = api_post("/quotes/generate", {"scope": scope, "labor_hours": hrs, "parts_cost": parts})
+            st.json(quote)
+    with t3:
+        client = st.text_input("Invoice client")
+        amount = st.number_input("Invoice amount", min_value=0.0, value=350.0)
+        job_id = st.text_input("Escrow job ID")
+        if st.button("Create Invoice"):
+            invoices = load_json(Path(DATA_DIR / "invoices.json"), [])
+            payload = {"id": f"INV-{len(invoices)+1:04}", "client": client, "amount": amount, "status": "Escrow Pending"}
+            invoices.append(payload)
+            save_json(Path(DATA_DIR / "invoices.json"), invoices)
+            st.success("Invoice created")
+        if st.button("Fund Escrow"):
+            st.success(str(api_post("/payments/escrow", {"job_id": job_id, "amount": amount})))
+
+
+def support_hub() -> None:
+    st.subheader("American Support Hub")
+    a, b = st.columns(2)
+    with a:
+        tech = st.text_input("Technician")
+        msg = st.text_area("Live chat message")
+        if st.button("Start Live Chat"):
+            chat = api_post("/support/live-chat", {"technician": tech, "message": msg})
+            st.success(f"{chat['agent']}: {chat['response']}")
+        issue = st.text_area("Ticket issue")
+        if st.button("Create Ticket"):
+            t = api_post("/support/ticket", {"technician": tech, "channel": "Ticket", "issue": issue})
+            st.info(f"Ticket {t['id']}")
+    with b:
+        st.markdown("### Knowledge Base")
+        st.dataframe(api_get("/support/knowledge-base", []), use_container_width=True)
+        st.markdown("### Local AI Troubleshooter")
+        q = st.text_area("Troubleshoot prompt")
+        if st.button("Ask AI"):
+            st.write(ask_local_ollama(q))
+
+
+def community_and_protection() -> None:
+    st.subheader("Community + Fair Pay Protection")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("### Forum + Mentoring")
+        for post in api_get("/community/posts", []):
+            st.markdown(f"**{post['title']}** — {post['author']}")
+            st.caption(post["body"])
+        st.markdown("### Success Stories")
+        st.dataframe(api_get("/community/success-stories", []), use_container_width=True)
+    with c2:
+        st.markdown("### Rate the Client")
+        st.dataframe(api_get("/clients/ratings", []), use_container_width=True)
+        st.markdown("### Dispute Voting")
+        dispute_id = st.text_input("Dispute ID", value="D-0001")
+        if st.button("Vote: Support Tech"):
+            st.success(api_post("/disputes/vote", {"dispute_id": dispute_id, "voter": "community_member", "vote": "support_tech"})["message"])
+        st.markdown("### Resource Library")
+        st.dataframe(api_get("/resources", []), use_container_width=True)
+
+
+def triad_integrations() -> None:
+    st.subheader("Triad Integrations")
+    t1, t2, t3 = st.columns(3)
+    with t1:
+        st.markdown("**Agentora**")
+        prompt = st.text_area("Quote/troubleshoot prompt")
+        if st.button("Run Agentora Quote"):
+            st.json(api_post("/integrations/agentora/quote", {"prompt": prompt, "model": "llama3.1"}))
+    with t2:
+        st.markdown("**Memoria**")
+        memory = st.text_area("Job memory")
+        if st.button("Save to Memoria"):
+            st.json(api_post("/integrations/memoria/save", {"memory": memory, "date": str(date.today())}))
+    with t3:
+        st.markdown("**LittUp**")
+        code_job = st.text_area("Code-related job payload")
+        if st.button("Send to LittUp"):
+            st.json(api_post("/integrations/littup/code-job", {"body": code_job}))
+
+
+def mobile_view() -> None:
+    st.subheader("Mobile Quick View")
+    st.write("Optimized quick actions for on-site techs.")
+    if st.button("Check Today's Schedule", use_container_width=True):
+        st.dataframe(api_get("/schedule", []), use_container_width=True)
 
 
 def main() -> None:
@@ -195,27 +198,22 @@ def main() -> None:
     start_embedded_api()
     load_css()
     dashboard_header()
-
     page = st.sidebar.radio(
         "Navigate",
-        ["Job Board", "Calendar & Earnings", "Tools Suite", "Support + Community", "Triad369 Hooks"],
+        ["Job Marketplace", "Tools Suite", "Support Hub", "Community", "Triad", "Mobile"],
     )
-
-    if page == "Job Board":
-        market_view()
-    elif page == "Calendar & Earnings":
-        st.subheader("Calendar & Earnings Tracker")
-        st.write("Mobile-first calendar block is ready for sync providers (Google, Outlook, CalDAV).")
-        invoices = load_json(Path(DATA_DIR / "invoices.json"), [])
-        paid = sum(inv["amount"] for inv in invoices)
-        st.metric("Total Logged Earnings", f"${paid:,.2f}")
-        st.dataframe(invoices, use_container_width=True)
+    if page == "Job Marketplace":
+        job_marketplace()
     elif page == "Tools Suite":
-        tools_view()
-    elif page == "Support + Community":
-        support_and_community_view()
+        tools_suite()
+    elif page == "Support Hub":
+        support_hub()
+    elif page == "Community":
+        community_and_protection()
+    elif page == "Triad":
+        triad_integrations()
     else:
-        integration_view()
+        mobile_view()
 
 
 if __name__ == "__main__":
